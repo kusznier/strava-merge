@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Strava Merge</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a222c;
+      --border: #2a3544;
+      --text: #e8edf4;
+      --muted: #8b9cb3;
+      --accent: #fc4c02;
+      --accent-dim: #c93d02;
+      --ok: #3ecf8e;
+      --err: #f87171;
+      --radius: 10px;
+      --font: "DM Sans", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2636 0%, var(--bg) 45%);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 3rem;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.75rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 0;
+      letter-spacing: -0.02em;
+    }
+    h1 span { color: var(--accent); }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    button, .btn {
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border: none;
+      border-radius: var(--radius);
+      padding: 0.55rem 1rem;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--accent-dim); }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) + 2px);
+      padding: 1.25rem 1.35rem;
+      margin-bottom: 1.25rem;
+    }
+    .card h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    label { color: var(--muted); font-size: 0.85rem; }
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%;
+      max-width: 420px;
+      margin-top: 0.25rem;
+      padding: 0.5rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.95rem;
+    }
+    textarea { min-height: 72px; max-width: 100%; resize: vertical; }
+    .row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; }
+    .field { flex: 1; min-width: 180px; }
+    .banner {
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius);
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+    }
+    .banner.err { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.35); color: #fecaca; }
+    .banner.ok { background: rgba(62, 207, 142, 0.12); border: 1px solid rgba(62, 207, 142, 0.35); color: #a7f3d0; }
+    .banner.warn { background: rgba(252, 76, 2, 0.1); border: 1px solid rgba(252, 76, 2, 0.35); color: #fdba74; }
+    .muted { color: var(--muted); font-size: 0.88rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .scroll {
+      max-height: min(52vh, 520px);
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .pairs {
+      display: grid;
+      gap: 0.6rem;
+    }
+    .pair {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.65rem 0.85rem;
+      background: var(--bg);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .pair small { color: var(--muted); display: block; margin-top: 0.15rem; }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 0.35rem;
+      vertical-align: middle;
+    }
+    .status-dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .status-dot.off { background: var(--muted); }
+    .loader {
+      display: inline-block;
+      width: 1rem;
+      height: 1rem;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    code { font-size: 0.85em; background: var(--bg); padding: 0.1em 0.35em; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Strava <span>Merge</span></h1>
+      <div class="toolbar">
+        <span id="authLabel" class="muted"><span class="status-dot off"></span>…</span>
+        <a id="loginBtn" class="btn btn-primary" href="/api/auth/login" style="display:none">Połącz ze Strava</a>
+        <button type="button" id="logoutBtn" class="btn btn-ghost" style="display:none">Wyloguj</button>
+      </div>
+    </header>
+
+    <div id="banner"></div>
+
+    <div id="blockUnconfigured" class="card" style="display:none">
+      <h2>Konfiguracja serwera</h2>
+      <p class="muted">
+        Ustaw zmienne środowiskowe <code>STRAVA_CLIENT_ID</code> i <code>STRAVA_CLIENT_SECRET</code>
+        (oraz <code>PUBLIC_BASE_URL</code> z adresem tej aplikacji) i zrestartuj kontener.
+        W panelu Strava (API Application) dodaj dokładnie ten adres przekierowania:
+        <code id="redirectHint"></code>
+      </p>
+    </div>
+
+    <div id="blockMain" style="display:none">
+      <div class="card">
+        <h2>Propozycje par (zegarek + licznik)</h2>
+        <p class="muted" style="margin-top:0">
+          Heurystyka: nakładające się przebiegi lub start w krótkim odstępie. Kliknij „Użyj parę”, żeby zaznaczyć dwie aktywności poniżej.
+        </p>
+        <div class="row" style="margin-bottom:0.75rem">
+          <div class="field">
+            <label for="suggDays">Dni wstecz (sugestie)</label>
+            <input type="number" id="suggDays" min="1" max="180" value="60" />
+          </div>
+          <button type="button" class="btn btn-ghost" id="reloadSugg">Odśwież sugestie</button>
+        </div>
+        <div id="pairsBox" class="pairs muted">Ładowanie…</div>
+      </div>
+
+      <div class="card">
+        <h2>Twoje aktywności</h2>
+        <div class="row" style="margin-bottom:0.75rem">
+          <div class="field">
+            <label for="actDays">Dni wstecz</label>
+            <input type="number" id="actDays" min="1" max="365" value="90" />
+          </div>
+          <button type="button" class="btn btn-ghost" id="reloadActs">Załaduj listę</button>
+        </div>
+        <p class="muted" style="margin-top:0">Zaznacz dokładnie dwie aktywności do połączenia (kolejność zostanie ułożona chronologicznie).</p>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:40px"></th>
+                <th>Data</th>
+                <th>Nazwa</th>
+                <th>Typ</th>
+                <th>Dystans</th>
+                <th>Czas</th>
+              </tr>
+            </thead>
+            <tbody id="actBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Scal i wyślij do Stravy</h2>
+        <div class="row">
+          <div class="field">
+            <label for="mergeName">Nazwa nowej aktywności</label>
+            <input type="text" id="mergeName" placeholder="np. Rower — scalone" />
+          </div>
+        </div>
+        <div class="field" style="margin-top:0.75rem">
+          <label for="mergeDesc">Opis (opcjonalnie)</label>
+          <textarea id="mergeDesc" placeholder=""></textarea>
+        </div>
+        <div style="margin-top:1rem">
+          <button type="button" class="btn btn-primary" id="mergeBtn" disabled>
+            Scal wybrane i prześlij
+          </button>
+          <span id="mergeStatus" class="muted" style="margin-left:0.75rem"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function showBanner(kind, text) {
+      const b = $("banner");
+      if (!text) { b.innerHTML = ""; b.className = ""; return; }
+      b.className = "banner " + (kind || "warn");
+      b.textContent = text;
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+    }
+
+    function fmtDist(m) {
+      if (m == null || Number.isNaN(m)) return "—";
+      return (m / 1000).toFixed(2) + " km";
+    }
+
+    function fmtTime(sec) {
+      if (!sec) return "—";
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h > 0) return h + "h " + m + "m";
+      return m + "m " + s + "s";
+    }
+
+    const selected = new Set();
+
+    function toggleRow(id, checked) {
+      if (checked) {
+        if (selected.size >= 2 && !selected.has(id)) {
+          const first = selected.values().next().value;
+          selected.delete(first);
+          const oldCb = document.querySelector('input[data-id="' + first + '"]');
+          if (oldCb) oldCb.checked = false;
+        }
+        selected.add(id);
+      } else {
+        selected.delete(id);
+      }
+      $("mergeBtn").disabled = selected.size !== 2;
+    }
+
+    async function api(path, opts) {
+      const r = await fetch(path, Object.assign({ credentials: "same-origin" }, opts || {}));
+      const ct = r.headers.get("content-type") || "";
+      const body = ct.includes("json") ? await r.json() : await r.text();
+      if (!r.ok) {
+        let msg;
+        if (typeof body === "object" && body) {
+          msg = body.detail || body.error || body.message;
+          if (Array.isArray(msg)) msg = msg.map((x) => x.msg || x).join("; ");
+        }
+        if (!msg) msg = typeof body === "string" ? body : JSON.stringify(body);
+        throw new Error(String(msg));
+      }
+      return body;
+    }
+
+    async function refreshAuth() {
+      const st = await api("/api/auth/status");
+      const label = $("authLabel");
+      if (st.authenticated) {
+        label.innerHTML = '<span class="status-dot on"></span>Zalogowano (Strava)';
+        $("loginBtn").style.display = "none";
+        $("logoutBtn").style.display = "inline-flex";
+      } else {
+        label.innerHTML = '<span class="status-dot off"></span>Nie połączono';
+        $("loginBtn").style.display = "inline-flex";
+        $("logoutBtn").style.display = "none";
+      }
+      return st.authenticated;
+    }
+
+    async function loadConfig() {
+      const c = await api("/api/config");
+      $("redirectHint").textContent = c.redirect_uri || "";
+      if (!c.configured) {
+        $("blockUnconfigured").style.display = "block";
+        $("blockMain").style.display = "none";
+        return false;
+      }
+      $("blockUnconfigured").style.display = "none";
+      return true;
+    }
+
+    function renderActivities(rows) {
+      const tb = $("actBody");
+      tb.innerHTML = "";
+      selected.clear();
+      $("mergeBtn").disabled = true;
+      for (const a of rows) {
+        const tr = document.createElement("tr");
+        const id = a.id;
+        tr.innerHTML =
+          '<td><input type="checkbox" data-id="' + id + '" /></td>' +
+          "<td>" + fmtDate(a.start_date) + "</td>" +
+          "<td>" + (a.name || "").replace(/</g, "&lt;") + "</td>" +
+          "<td>" + (a.type || "") + "</td>" +
+          "<td>" + fmtDist(a.distance) + "</td>" +
+          "<td>" + fmtTime(a.elapsed_time) + "</td>";
+        const cb = tr.querySelector("input");
+        cb.addEventListener("change", () => toggleRow(id, cb.checked));
+        tb.appendChild(tr);
+      }
+    }
+
+    async function loadActivities() {
+      const days = parseInt($("actDays").value, 10) || 90;
+      $("actBody").innerHTML = '<tr><td colspan="6" class="muted">Ładowanie…</td></tr>';
+      const data = await api("/api/activities?days=" + encodeURIComponent(days));
+      renderActivities(data.activities || []);
+    }
+
+    function applyPair(idFirst, idSecond) {
+      selected.clear();
+      document.querySelectorAll('#actBody input[type="checkbox"]').forEach((cb) => {
+        cb.checked = false;
+      });
+      const ids = [idFirst, idSecond];
+      for (const id of ids) {
+        const cb = document.querySelector('input[data-id="' + id + '"]');
+        if (cb) {
+          cb.checked = true;
+          selected.add(id);
+        }
+      }
+      $("mergeBtn").disabled = selected.size !== 2;
+      if (selected.size < 2) {
+        showBanner("warn", "Nie znaleziono tych ID na aktualnej liście — zwiększ „dni wstecz” i załaduj ponownie.");
+      } else {
+        showBanner("ok", "Zaznaczono propozycję par. Uzupełnij nazwę i scal.");
+      }
+    }
+
+    async function loadSuggestions() {
+      const days = parseInt($("suggDays").value, 10) || 60;
+      $("pairsBox").innerHTML = '<span class="loader"></span> <span class="muted">Ładowanie…</span>';
+      const data = await api("/api/suggestions?days=" + encodeURIComponent(days));
+      const pairs = data.pairs || [];
+      if (!pairs.length) {
+        $("pairsBox").innerHTML = '<span class="muted">Brak propozycji w tym zakresie dat.</span>';
+        return;
+      }
+      $("pairsBox").innerHTML = "";
+      for (const p of pairs) {
+        const div = document.createElement("div");
+        div.className = "pair";
+        div.innerHTML =
+          '<div><strong>#' + p.id_first + "</strong> " + (p.name_first || "").replace(/</g, "&lt;") +
+          " <small>" + (p.type_first || "") + "</small>" +
+          '<br/><strong>#' + p.id_second + "</strong> " + (p.name_second || "").replace(/</g, "&lt;") +
+          " <small>" + (p.type_second || "") + "</small>" +
+          '<br/><small>' + (p.reason || "") + " · score " + p.score + "</small></div>" +
+          '<button type="button" class="btn btn-ghost use-pair">Użyj parę</button>';
+        div.querySelector(".use-pair").addEventListener("click", () => applyPair(p.id_first, p.id_second));
+        $("pairsBox").appendChild(div);
+      }
+    }
+
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("connected") === "1") {
+        showBanner("ok", "Połączono ze Strava. Token zapisano na serwerze (odświeżanie automatyczne).");
+        window.history.replaceState({}, "", "/");
+      } else if (params.get("error")) {
+        showBanner("err", "OAuth: " + params.get("error") + (params.get("message") ? " — " + params.get("message") : ""));
+        window.history.replaceState({}, "", "/");
+      }
+
+      const ok = await loadConfig();
+      if (!ok) return;
+
+      const authed = await refreshAuth();
+      $("blockMain").style.display = "block";
+
+      $("logoutBtn").addEventListener("click", async () => {
+        await api("/api/auth/logout", { method: "POST" });
+        await refreshAuth();
+        showBanner("warn", "Wylogowano — token usunięty z serwera.");
+      });
+
+      if (!authed) {
+        showBanner("warn", "Kliknij „Połącz ze Strava”, aby zapisać autoryzację na tym serwerze.");
+        return;
+      }
+
+      await loadActivities();
+      await loadSuggestions();
+
+      $("reloadActs").addEventListener("click", () => loadActivities().catch((e) => showBanner("err", e.message)));
+      $("reloadSugg").addEventListener("click", () => loadSuggestions().catch((e) => showBanner("err", e.message)));
+
+      $("mergeBtn").addEventListener("click", async () => {
+        const ids = Array.from(selected);
+        if (ids.length !== 2) return;
+        $("mergeStatus").innerHTML = '<span class="loader"></span>';
+        $("mergeBtn").disabled = true;
+        try {
+          const res = await api("/api/merge", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              activity_ids: ids,
+              name: $("mergeName").value.trim() || "Merged ride",
+              description: $("mergeDesc").value.trim(),
+            }),
+          });
+          $("mergeStatus").textContent = "Wysłano (upload id: " + (res.upload && res.upload.id != null ? res.upload.id : "OK") + ")";
+          showBanner("ok", "Scalenie zakończone — sprawdź import w Strava (przetwarzanie może chwilę potrwać).");
+        } catch (e) {
+          $("mergeStatus").textContent = "";
+          showBanner("err", e.message);
+        } finally {
+          $("mergeBtn").disabled = selected.size !== 2;
+        }
+      });
+    }
+
+    init().catch((e) => showBanner("err", e.message));
+  </script>
+</body>
+</html>

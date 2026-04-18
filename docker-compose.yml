@@ -1,0 +1,19 @@
+# Copy .env.example to .env next to this file and set STRAVA_* and PUBLIC_BASE_URL.
+services:
+  strava-merge:
+    build: .
+    image: strava-merge:local
+    ports:
+      - "8787:8787"
+    environment:
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
+      # URL you use in the browser (Unraid IP, hostname, or domain)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8787}
+      DATA_DIR: /data
+    volumes:
+      - strava-merge-data:/data
+    restart: unless-stopped
+
+volumes:
+  strava-merge-data:
