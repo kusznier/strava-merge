@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -8,6 +9,8 @@ from stravalib import Client
 
 from app.config import Settings
 from app.tokens import load_tokens, save_tokens, token_needs_refresh
+
+logger = logging.getLogger(__name__)
 
 
 def refresh_access_token(settings: Settings) -> dict[str, Any]:
@@ -131,6 +134,30 @@ def activity_to_row(a: dict[str, Any]) -> dict[str, Any]:
         "start_date": a.get("start_date"),
         "elapsed_time": int(a.get("elapsed_time") or 0),
         "distance": float(a.get("distance") or 0),
+        # Often empty on list endpoint; use GET /api/activity/{id} for device_name.
+        "device_name": a.get("device_name") or "",
+    }
+
+
+def fetch_activity_detail(access_token: str, activity_id: int) -> dict[str, Any]:
+    """GET /activities/{id} — includes device_name, gear, etc."""
+    r = requests.get(
+        f"https://www.strava.com/api/v3/activities/{activity_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=60,
+    )
+    r.raise_for_status()
+    raw = r.json()
+    return {
+        "id": raw["id"],
+        "name": raw.get("name") or "",
+        "type": raw.get("type") or raw.get("sport_type") or "",
+        "sport_type": raw.get("sport_type") or "",
+        "device_name": raw.get("device_name") or "",
+        "gear_id": raw.get("gear_id"),
+        "start_date": raw.get("start_date"),
+        "elapsed_time": int(raw.get("elapsed_time") or 0),
+        "distance": float(raw.get("distance") or 0),
     }
 
 
@@ -155,4 +182,22 @@ def upload_tcx(
         r = requests.post(url, headers=headers, data=data, files=files, timeout=120)
     if r.status_code not in (200, 201):
         raise RuntimeError(f"Upload failed: {r.status_code} {r.text}")
+    out = r.json()
+    logger.info(
+        "strava upload accepted: id=%s status=%s activity_id=%s error=%s",
+        out.get("id"),
+        out.get("status"),
+        out.get("activity_id"),
+        out.get("error"),
+    )
+    return out
+
+
+def fetch_upload_status(access_token: str, upload_id: int) -> dict[str, Any]:
+    """Poll Strava processing status for a file upload (GET /uploads/{id})."""
+    url = f"https://www.strava.com/api/v3/uploads/{upload_id}"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    r = requests.get(url, headers=headers, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"Upload status failed: {r.status_code} {r.text}")
     return r.json()

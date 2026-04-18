@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -16,6 +17,8 @@ from app.strava_service import (
     ensure_client,
     exchange_code,
     fetch_activities_pages,
+    fetch_activity_detail,
+    fetch_upload_status,
     activity_to_row,
     refresh_access_token,
     upload_tcx,
@@ -26,12 +29,19 @@ from app.tokens import clear_tokens, is_configured, load_tokens
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Strava Merge", version="1.0.0")
 
 
 @app.on_event("startup")
 def _startup():
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    fmt = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+    try:
+        logging.basicConfig(level=logging.INFO, format=fmt, force=True)
+    except TypeError:
+        logging.basicConfig(level=logging.INFO, format=fmt)
 
 
 if STATIC_DIR.is_dir():
@@ -42,6 +52,8 @@ class MergeRequest(BaseModel):
     activity_ids: list[int] = Field(..., min_length=2, max_length=2)
     name: str = Field(..., min_length=1, max_length=200)
     description: str = ""
+    # Which activity defines TCX <Activity Sport="..."> (e.g. head unit vs watch). Must be one of activity_ids.
+    primary_activity_id: int | None = None
 
 
 @app.get("/api/health")
@@ -134,6 +146,13 @@ def list_activities(days: int = Query(90, ge=1, le=365)):
     return {"activities": rows, "count": len(rows)}
 
 
+@app.get("/api/activity/{activity_id}")
+def activity_detail(activity_id: int):
+    """Single activity details from Strava (includes device_name when available)."""
+    access = _bearer()
+    return fetch_activity_detail(access, activity_id)
+
+
 @app.get("/api/suggestions")
 def list_suggestions(days: int = Query(60, ge=1, le=180)):
     after_ts = int(time.time()) - days * 86400
@@ -153,14 +172,30 @@ def merge_activities(body: MergeRequest):
     ids = body.activity_ids
     if ids[0] == ids[1]:
         raise HTTPException(status_code=400, detail="Wybierz dwie różne aktywności.")
+    if body.primary_activity_id is not None and body.primary_activity_id not in (ids[0], ids[1]):
+        raise HTTPException(
+            status_code=400,
+            detail="primary_activity_id must be one of the two activity ids.",
+        )
     try:
         client = ensure_client(settings)
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e)) from e
 
+    logger.info(
+        "merge start activity_ids=%s primary_activity_id=%s name=%r",
+        ids,
+        body.primary_activity_id,
+        body.name.strip(),
+    )
     tmp: str | None = None
     try:
-        tmp = merge_to_tempfile(client, ids[0], ids[1])
+        tmp = merge_to_tempfile(
+            client,
+            ids[0],
+            ids[1],
+            primary_activity_id=body.primary_activity_id,
+        )
         access = _bearer()
         result = upload_tcx(
             access,
@@ -168,8 +203,10 @@ def merge_activities(body: MergeRequest):
             name=body.name.strip(),
             description=body.description.strip(),
         )
+        logger.info("merge done upload_id=%s", result.get("id"))
         return {"ok": True, "upload": result}
     except Exception as e:
+        logger.exception("merge failed: %s", e)
         return JSONResponse(
             status_code=500,
             content={"ok": False, "error": str(e)},
@@ -180,6 +217,16 @@ def merge_activities(body: MergeRequest):
                 os.unlink(tmp)
             except OSError:
                 pass
+
+
+@app.get("/api/uploads/{upload_id}")
+def upload_status(upload_id: int):
+    """Strava upload queue status (processing / error / activity_id when ready)."""
+    access = _bearer()
+    try:
+        return fetch_upload_status(access, upload_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @app.get("/")

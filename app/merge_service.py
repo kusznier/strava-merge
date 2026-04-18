@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -9,6 +10,8 @@ import xml.etree.ElementTree as ET
 
 from stravalib import Client
 from stravalib.model import Stream
+
+logger = logging.getLogger(__name__)
 
 
 def _create_points(streams: dict, start_time: datetime) -> list[dict]:
@@ -41,6 +44,8 @@ def merge_two_activities_to_tcx(
     act1_id: int,
     act2_id: int,
     output_path: Path,
+    *,
+    primary_activity_id: int | None = None,
 ) -> None:
     first = client.get_activity(act1_id)
     second = client.get_activity(act2_id)
@@ -51,7 +56,14 @@ def merge_two_activities_to_tcx(
         first, second = second, first
         first_id, second_id = second_id, first_id
 
-    sport = str(first.type)
+    if primary_activity_id is not None:
+        if primary_activity_id not in (act1_id, act2_id):
+            raise ValueError("primary_activity_id must be one of the two merged activity ids")
+        primary = client.get_activity(primary_activity_id)
+        sport = str(primary.type)
+        logger.info("merge: TCX Sport from primary_activity_id=%s -> %s", primary_activity_id, sport)
+    else:
+        sport = str(first.type)
 
     types = ["time", "latlng", "distance", "altitude", "heartrate", "cadence", "watts"]
     streams1 = client.get_activity_streams(first_id, types=types)
@@ -68,6 +80,16 @@ def merge_two_activities_to_tcx(
 
     all_points = points1 + points2
     all_points.sort(key=lambda p: p["time"])
+    logger.info(
+        "merge: ordered earlier=%s later=%s points=%s+%s=%s time_span=%s..%s",
+        first_id,
+        second_id,
+        len(points1),
+        len(points2),
+        len(all_points),
+        all_points[0]["time"].isoformat() if all_points else None,
+        all_points[-1]["time"].isoformat() if all_points else None,
+    )
 
     root = ET.Element(
         "TrainingCenterDatabase",
@@ -115,10 +137,27 @@ def merge_two_activities_to_tcx(
     tree.write(str(output_path), encoding="unicode", xml_declaration=True)
 
 
-def merge_to_tempfile(client: Client, act1_id: int, act2_id: int) -> str:
-    fd, path = tempfile.mkstemp(suffix=".tcx", prefix="merged_")
+def merge_to_tempfile(
+    client: Client,
+    act1_id: int,
+    act2_id: int,
+    *,
+    primary_activity_id: int | None = None,
+) -> str:
     import os
 
+    fd, path = tempfile.mkstemp(suffix=".tcx", prefix="merged_")
     os.close(fd)
-    merge_two_activities_to_tcx(client, act1_id, act2_id, Path(path))
+    merge_two_activities_to_tcx(
+        client,
+        act1_id,
+        act2_id,
+        Path(path),
+        primary_activity_id=primary_activity_id,
+    )
+    try:
+        sz = os.path.getsize(path)
+    except OSError:
+        sz = 0
+    logger.info("merge: wrote tcx path=%s size_bytes=%s", path, sz)
     return path

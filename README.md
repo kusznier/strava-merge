@@ -11,6 +11,8 @@ A small web app for Strava OAuth with **persistent tokens** (access + refresh), 
 - [Unraid](#unraid)
 - [Local development](#local-development)
 - [HTTP API](#http-api)
+- [Logs and upload status](#logs-and-upload-status)
+- [Merging back-to-back activities](#merging-back-to-back-activities)
 - [Why the CLI kept asking for auth](#why-the-cli-kept-asking-for-auth)
 - [Troubleshooting](#troubleshooting)
 - [Further documentation](#further-documentation)
@@ -89,8 +91,39 @@ Open `http://localhost:8787` (Strava callback domain: `localhost`).
 | GET | `/api/auth/callback` | OAuth callback (`code` query param) |
 | POST | `/api/auth/logout` | Remove token from the server |
 | GET | `/api/activities?days=90` | List activities |
+| GET | `/api/activity/{id}` | One activity from Strava (**`device_name`**, type, distance, …) |
 | GET | `/api/suggestions?days=60` | Suggested pairs to merge |
-| POST | `/api/merge` | JSON body: `{ "activity_ids": [id1, id2], "name": "...", "description": "..." }` |
+| POST | `/api/merge` | JSON: `{ "activity_ids": [id1, id2], "name", "description", "primary_activity_id": optional }` — `primary_activity_id` sets TCX **Sport** (must be one of the two ids; e.g. pick the head-unit activity). |
+| GET | `/api/uploads/{upload_id}` | Strava file-upload status (`status`, `error`, `activity_id` when processed) |
+
+## Logs and upload status
+
+Server logs go to **stderr** (visible in Docker / Unraid container logs).
+
+```bash
+docker logs -f strava-merge-1
+# or: docker compose logs -f
+```
+
+Look for lines from `app.merge_service` / `app.strava_service` (merge point counts, TCX size, upload id, Strava `status`).
+
+After a merge, the UI shows an **upload id**. Poll Strava until the activity exists:
+
+```bash
+curl -s "http://YOUR_HOST:8787/api/uploads/UPLOAD_ID"
+```
+
+(Uses the token stored on the server; same single-user setup as the web UI.)
+
+Typical Strava `status` values: processing queue → finished with `activity_id`, or `error` with a message if the file was rejected.
+
+## Merging back-to-back activities
+
+If one workout **ends** and the **next starts later** (no overlap), the merge still **sorts all GPS points by time**. You get one activity whose track is: full first session, then full second session. **Distance** in the TCX is cumulative (second leg’s stream distances are offset by the first leg’s max distance).
+
+**Map behavior:** there can be a **long straight line** (or jump) between the last point of session A and the first point of session B if you moved to a new start location — that is normal. **Overlapping** duplicate recordings (watch + head unit on the same ride) interleave by timestamp after sorting, which can look messy; this tool is best for **sequential** segments or **overlapping** twin uploads you understand.
+
+**Primary activity / device:** Strava’s [detailed activity](https://developers.strava.com/docs/reference/#api-models-DetailedActivity) includes **`device_name`** (e.g. Garmin Edge vs watch). Use **`GET /api/activity/{id}`** in the UI to show it. **`primary_activity_id`** in `/api/merge` only changes the TCX **`Sport`** type (e.g. ensure **Ride** from the head unit); it does not remove or prefer one GPS stream over the other.
 
 ## Why the CLI kept asking for auth
 
@@ -102,6 +135,7 @@ The Strava authorization code (`?code=...`) is **single-use**. This app stores a
 - **Session gone after restart** — no persistent volume on `/data` or wrong `DATA_DIR`.
 - **Empty activity list** — increase the day range in the UI or check `MAX_ACTIVITY_PAGES`.
 - **TCX upload errors** — check app scopes (`activity:write`) and Strava rate limits.
+- **Upload accepted but no activity** — Strava processes uploads asynchronously; check [Logs](#logs-and-upload-status) and `GET /api/uploads/{id}`. If `error` is set, Strava rejected the file (see message).
 
 ## Further documentation
 
