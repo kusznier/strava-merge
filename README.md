@@ -93,7 +93,8 @@ Open `http://localhost:8787` (Strava callback domain: `localhost`).
 | GET | `/api/activities?days=90` | List activities |
 | GET | `/api/activity/{id}` | One activity from Strava (**`device_name`**, type, distance, …) |
 | GET | `/api/suggestions?days=60` | Suggested pairs to merge |
-| POST | `/api/merge` | JSON: `{ "activity_ids": [id1, id2], "name", "description", "primary_activity_id": optional }` — `primary_activity_id` sets TCX **Sport** (must be one of the two ids; e.g. pick the head-unit activity). |
+| POST | `/api/backup/snapshot` | Saves **all** activities (paginated list JSON) under `DATA_DIR/backups/activities_snapshot_*.json` |
+| POST | `/api/merge` | JSON: `activity_ids`, `name`, `description`, optional `primary_activity_id`, `randomize_tcx_ids`, `delete_source_activities` — see below. |
 | GET | `/api/uploads/{upload_id}` | Strava file-upload status (`status`, `error`, `activity_id` when processed) |
 
 ## Logs and upload status
@@ -124,6 +125,13 @@ If one workout **ends** and the **next starts later** (no overlap), the merge st
 **Map behavior:** there can be a **long straight line** (or jump) between the last point of session A and the first point of session B if you moved to a new start location — that is normal. **Overlapping** duplicate recordings (watch + head unit on the same ride) interleave by timestamp after sorting, which can look messy; this tool is best for **sequential** segments or **overlapping** twin uploads you understand.
 
 **Primary activity / device:** Strava’s [detailed activity](https://developers.strava.com/docs/reference/#api-models-DetailedActivity) includes **`device_name`** (e.g. Garmin Edge vs watch). Use **`GET /api/activity/{id}`** in the UI to show it. **`primary_activity_id`** in `/api/merge` only changes the TCX **`Sport`** type (e.g. ensure **Ride** from the head unit); it does not remove or prefer one GPS stream over the other.
+
+**UI / merge options**
+
+- On load (when logged in), the app calls **`POST /api/backup/snapshot`** — writes a JSON snapshot of your full activity list to `DATA_DIR/backups/` (same pagination limit as `MAX_ACTIVITY_PAGES`).
+- **`randomize_tcx_ids`:** sets the TCX `<Activity><Id>` to a random UUID (experimental; Strava duplicate detection is mostly GPS-based).
+- **`delete_source_activities`:** writes a folder under `DATA_DIR/backups/` with **full activity JSON + streams** for the two selected ids, then **merges** (while activities still exist), **deletes** both activities on Strava, then **uploads** the merged TCX. If upload fails after delete, you rely on the on-disk backup. Use with care.
+- The web UI can **poll `GET /api/uploads/{id}`** after merge (checkbox, on by default) so you see Strava processing result without using `curl`.
 
 ## Why the CLI kept asking for auth
 

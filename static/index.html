@@ -183,6 +183,7 @@
     </header>
 
     <div id="banner"></div>
+    <p id="snapshotStatus" class="muted" style="margin:-0.5rem 0 1rem"></p>
 
     <div id="blockUnconfigured" class="card" style="display:none">
       <h2>Konfiguracja serwera</h2>
@@ -254,6 +255,21 @@
           <p class="muted" style="margin:0 0 0.5rem">Strava podaje urządzenie w szczegółach aktywności. Wybierz nagranie z licznika, jeśli ma poprawny typ (np. Ride).</p>
           <div id="primaryRadios" class="muted">—</div>
         </div>
+        <div class="field" style="margin-top:0.75rem">
+          <label style="display:block;margin:0.35rem 0;cursor:pointer">
+            <input type="checkbox" id="chkRandomizeId" /> Randomizuj <code>&lt;Id&gt;</code> w TCX (eksperyment na „duplicate”)
+          </label>
+          <label style="display:block;margin:0.35rem 0;cursor:pointer">
+            <input type="checkbox" id="chkDeleteSources" /> Zrób backup tych dwóch aktywności (JSON + streamy na serwer), <strong>usuń je w Stravie</strong>, potem wgraj merge
+          </label>
+          <p class="muted" style="margin:0.35rem 0 0">Przy usuwaniu: kolejność to backup → merge (pobranie GPS) → usunięcie wpisów → upload. Jeśli upload padnie po usunięciu, zostaje backup w <code>DATA_DIR/backups/</code>.</p>
+        </div>
+        <div class="field" style="margin-top:0.75rem">
+          <label style="display:block;margin:0.35rem 0;cursor:pointer">
+            <input type="checkbox" id="chkPollUpload" checked /> Po wgraniu odpytuj status importu (bez <code>curl</code> — wynik poniżej)
+          </label>
+        </div>
+        <div id="uploadPollBox" class="muted" style="margin-top:0.5rem;padding:0.65rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;white-space:pre-wrap;max-height:160px;overflow:auto;display:none"></div>
         <div style="margin-top:1rem">
           <button type="button" class="btn btn-primary" id="mergeBtn" disabled>
             Scal wybrane i prześlij
@@ -353,6 +369,48 @@
       } catch (e) {
         rad.textContent = "Nie udało się pobrać szczegółów: " + e.message;
       }
+    }
+
+    function htmlToText(html) {
+      if (!html) return "";
+      var d = document.createElement("div");
+      d.innerHTML = html;
+      return (d.textContent || d.innerText || "").trim();
+    }
+
+    async function pollUploadStatus(uploadId) {
+      var box = $("uploadPollBox");
+      var maxAttempts = 45;
+      var delayMs = 2000;
+      box.style.display = "block";
+      for (var i = 0; i < maxAttempts; i++) {
+        var st = await api("/api/uploads/" + uploadId);
+        if (st.activity_id) {
+          var url = "https://www.strava.com/activities/" + st.activity_id;
+          box.innerHTML =
+            "Gotowe. Nowa aktywność: <a href=\"" +
+            url +
+            "\" target=\"_blank\" rel=\"noopener\">#" +
+            st.activity_id +
+            "</a>";
+          showBanner("ok", "Import zakończony — nowa aktywność w Strava.");
+          return st;
+        }
+        if (st.error) {
+          box.textContent =
+            "Błąd Stravy: " + htmlToText(st.error) + (st.status ? "\nStatus: " + st.status : "");
+          showBanner("err", "Import odrzucony lub błąd — zobacz pole poniżej.");
+          return st;
+        }
+        box.textContent =
+          (st.status || "Przetwarzanie…") + " (" + (i + 1) + "/" + maxAttempts + ")";
+        await new Promise(function (r) {
+          setTimeout(r, delayMs);
+        });
+      }
+      box.textContent = "Timeout — sprawdź ręcznie: GET /api/uploads/" + uploadId;
+      showBanner("warn", "Status importu nieznany (timeout) — sprawdź pole poniżej lub Stravę.");
+      return null;
     }
 
     async function api(path, opts) {
@@ -504,6 +562,19 @@
       await loadActivities();
       await loadSuggestions();
 
+      api("/api/backup/snapshot", { method: "POST" })
+        .then(function (r) {
+          var el = $("snapshotStatus");
+          if (el) {
+            el.textContent =
+              "Automatyczny backup listy: " + r.count + " aktywności zapisano w " + (r.path || "");
+          }
+        })
+        .catch(function () {
+          var el = $("snapshotStatus");
+          if (el) el.textContent = "";
+        });
+
       $("reloadActs").addEventListener("click", () => loadActivities().catch((e) => showBanner("err", e.message)));
       $("reloadSugg").addEventListener("click", () => loadSuggestions().catch((e) => showBanner("err", e.message)));
 
@@ -511,6 +582,11 @@
         const ids = Array.from(selected);
         if (ids.length !== 2) return;
         $("mergeStatus").innerHTML = '<span class="loader"></span>';
+        var pollBox = $("uploadPollBox");
+        if (pollBox) {
+          pollBox.style.display = "none";
+          pollBox.textContent = "";
+        }
         $("mergeBtn").disabled = true;
         try {
           var primaryEl = document.querySelector('input[name="primaryAct"]:checked');
@@ -524,12 +600,23 @@
             body: JSON.stringify({
               activity_ids: ids,
               primary_activity_id: primaryId,
+              randomize_tcx_ids: $("chkRandomizeId").checked,
+              delete_source_activities: $("chkDeleteSources").checked,
               name: $("mergeName").value.trim() || "Merged ride",
               description: $("mergeDesc").value.trim(),
             }),
           });
-          $("mergeStatus").textContent = "Wysłano (upload id: " + (res.upload && res.upload.id != null ? res.upload.id : "OK") + ")";
-          showBanner("ok", "Scalenie zakończone — sprawdź import w Strava (przetwarzanie może chwilę potrwać).");
+          var extra = "";
+          if (res.backup_dir) extra = " · backup: " + res.backup_dir;
+          $("mergeStatus").textContent =
+            "Wysłano (upload id: " + (res.upload && res.upload.id != null ? res.upload.id : "OK") + ")" + extra;
+          var uid = res.upload && res.upload.id != null ? res.upload.id : null;
+          if ($("chkPollUpload").checked && uid) {
+            await pollUploadStatus(uid);
+          } else {
+            showBanner("ok", "Upload przyjęty — włącz odpytywanie statusu lub sprawdź Stravę.");
+            if (pollBox) pollBox.style.display = "none";
+          }
         } catch (e) {
           $("mergeStatus").textContent = "";
           showBanner("err", e.message);

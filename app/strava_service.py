@@ -193,6 +193,16 @@ def upload_tcx(
     return out
 
 
+def delete_activity(access_token: str, activity_id: int) -> None:
+    r = requests.delete(
+        f"https://www.strava.com/api/v3/activities/{activity_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=60,
+    )
+    if r.status_code not in (200, 204):
+        raise RuntimeError(f"Delete activity {activity_id} failed: {r.status_code} {r.text}")
+
+
 def fetch_upload_status(access_token: str, upload_id: int) -> dict[str, Any]:
     """Poll Strava processing status for a file upload (GET /uploads/{id})."""
     url = f"https://www.strava.com/api/v3/uploads/{upload_id}"

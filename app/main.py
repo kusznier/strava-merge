@@ -11,10 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.config import Settings, settings
+from app.backup import backup_two_activities, save_all_activities_snapshot
 from app.merge_service import merge_to_tempfile
 from app.strava_service import (
     auth_url,
     ensure_client,
+    delete_activity,
     exchange_code,
     fetch_activities_pages,
     fetch_activity_detail,
@@ -54,6 +56,9 @@ class MergeRequest(BaseModel):
     description: str = ""
     # Which activity defines TCX <Activity Sport="..."> (e.g. head unit vs watch). Must be one of activity_ids.
     primary_activity_id: int | None = None
+    randomize_tcx_ids: bool = False
+    # Backup detail+streams to disk, delete both on Strava, then upload merged TCX (avoid duplicate detection).
+    delete_source_activities: bool = False
 
 
 @app.get("/api/health")
@@ -153,6 +158,22 @@ def activity_detail(activity_id: int):
     return fetch_activity_detail(access, activity_id)
 
 
+@app.post("/api/backup/snapshot")
+def backup_snapshot():
+    """Zapisuje pełną listę aktywności ze Stravy do DATA_DIR/backups (JSON)."""
+    access = _bearer()
+    path, count = save_all_activities_snapshot(
+        access,
+        settings.data_dir,
+        max_pages=settings.max_activity_pages,
+    )
+    try:
+        rel = path.relative_to(settings.data_dir)
+    except ValueError:
+        rel = path
+    return {"ok": True, "path": str(rel), "count": count}
+
+
 @app.get("/api/suggestions")
 def list_suggestions(days: int = Query(60, ge=1, le=180)):
     after_ts = int(time.time()) - days * 86400
@@ -183,20 +204,37 @@ def merge_activities(body: MergeRequest):
         raise HTTPException(status_code=401, detail=str(e)) from e
 
     logger.info(
-        "merge start activity_ids=%s primary_activity_id=%s name=%r",
+        "merge start activity_ids=%s primary=%s randomize_tcx_ids=%s delete_sources=%s name=%r",
         ids,
         body.primary_activity_id,
+        body.randomize_tcx_ids,
+        body.delete_source_activities,
         body.name.strip(),
     )
+    access = _bearer()
     tmp: str | None = None
+    backup_rel: str | None = None
     try:
+        if body.delete_source_activities:
+            bdir = backup_two_activities(access, settings.data_dir, ids[0], ids[1])
+            try:
+                backup_rel = str(bdir.relative_to(settings.data_dir))
+            except ValueError:
+                backup_rel = str(bdir)
+
         tmp = merge_to_tempfile(
             client,
             ids[0],
             ids[1],
             primary_activity_id=body.primary_activity_id,
+            randomize_tcx_ids=body.randomize_tcx_ids,
         )
-        access = _bearer()
+
+        if body.delete_source_activities:
+            delete_activity(access, ids[0])
+            delete_activity(access, ids[1])
+            logger.info("deleted source activities %s", ids)
+
         result = upload_tcx(
             access,
             tmp,
@@ -204,7 +242,10 @@ def merge_activities(body: MergeRequest):
             description=body.description.strip(),
         )
         logger.info("merge done upload_id=%s", result.get("id"))
-        return {"ok": True, "upload": result}
+        out: dict = {"ok": True, "upload": result}
+        if backup_rel:
+            out["backup_dir"] = backup_rel
+        return out
     except Exception as e:
         logger.exception("merge failed: %s", e)
         return JSONResponse(

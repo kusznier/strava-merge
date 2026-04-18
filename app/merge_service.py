@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -46,6 +47,7 @@ def merge_two_activities_to_tcx(
     output_path: Path,
     *,
     primary_activity_id: int | None = None,
+    randomize_tcx_ids: bool = False,
 ) -> None:
     first = client.get_activity(act1_id)
     second = client.get_activity(act2_id)
@@ -98,7 +100,11 @@ def merge_two_activities_to_tcx(
     activities_elem = ET.SubElement(root, "Activities")
     activity_elem = ET.SubElement(activities_elem, "Activity", Sport=sport)
     id_elem = ET.SubElement(activity_elem, "Id")
-    id_elem.text = datetime.now().isoformat()
+    if randomize_tcx_ids:
+        id_elem.text = str(uuid.uuid4())
+        logger.info("merge: TCX Activity Id randomized (uuid)")
+    else:
+        id_elem.text = datetime.now().isoformat()
 
     lap = ET.SubElement(
         activity_elem,
@@ -143,6 +149,7 @@ def merge_to_tempfile(
     act2_id: int,
     *,
     primary_activity_id: int | None = None,
+    randomize_tcx_ids: bool = False,
 ) -> str:
     import os
 
@@ -154,6 +161,7 @@ def merge_to_tempfile(
         act2_id,
         Path(path),
         primary_activity_id=primary_activity_id,
+        randomize_tcx_ids=randomize_tcx_ids,
     )
     try:
         sz = os.path.getsize(path)
